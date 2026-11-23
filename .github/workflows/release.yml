@@ -1,10 +1,15 @@
 name: Publish prebuilt plugin
 on:
   push:
+    branches: [main]
+    paths: ['.github/workflows/release.yml']
     tags: ['v*']
   workflow_dispatch:
 permissions:
   contents: write
+concurrency:
+  group: publish-prebuilt-plugin
+  cancel-in-progress: false
 jobs:
   release:
     runs-on: ubuntu-latest
@@ -16,15 +21,41 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          [[ "$GITHUB_REF_TYPE" == tag && "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
           git init --quiet source
-          git -C source fetch --quiet --depth=1 "https://github.com/$GITHUB_REPOSITORY.git" "$GITHUB_REF"
-          commit="$(git -C source rev-parse FETCH_HEAD^{commit})"
-          [[ "$commit" == "$GITHUB_SHA" ]]
-          archive="$PLUGIN_PACKAGE-${GITHUB_REF_NAME#v}.tgz"
-          git -C source show "$commit:releases/$archive" > "$archive"
-          git -C source show "$commit:releases/$archive.sha256" > "$archive.sha256"
-          sha256sum --check "$archive.sha256"
-          cp "$archive" "$PLUGIN_PACKAGE.tgz"
-          sha256sum "$PLUGIN_PACKAGE.tgz" > "$PLUGIN_PACKAGE.tgz.sha256"
-          gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --verify-tag --title "$GITHUB_REF_NAME" --notes "Versioned DSH plugin archive and SHA-256 checksum." "$PLUGIN_PACKAGE.tgz" "$PLUGIN_PACKAGE.tgz.sha256"
+          git -C source fetch --quiet --no-tags "https://github.com/$GITHUB_REPOSITORY.git" \
+            'refs/heads/main:refs/remotes/origin/main' 'refs/tags/v*:refs/tags/v*'
+          case "$GITHUB_REF" in
+            refs/heads/main)
+              git -C source merge-base --is-ancestor "$GITHUB_SHA" refs/remotes/origin/main
+              version="$(git -C source show "$GITHUB_SHA:package.json" | jq -er --arg n "$PLUGIN_PACKAGE" 'select(.name == $n) | .version')"
+              tag="v$version"
+              ;;
+            refs/tags/v*) tag="$GITHUB_REF_NAME" ;;
+            *) exit 1 ;;
+          esac
+          [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          tagged="$(git -C source rev-parse --verify "refs/tags/$tag^{commit}")"
+          if [[ "$GITHUB_REF_TYPE" == tag ]]; then
+            [[ "$tagged" == "$(git -C source rev-parse --verify "$GITHUB_SHA^{commit}")" ]]
+          else
+            git -C source merge-base --is-ancestor "$tagged" "$GITHUB_SHA"
+          fi
+          git -C source merge-base --is-ancestor "$tagged" refs/remotes/origin/main
+          archive="$PLUGIN_PACKAGE-${tag#v}.tgz"
+          git -C source show "$tagged:releases/$archive" > "$archive"
+          git -C source show "$tagged:releases/$archive.sha256" > "$archive.sha256"
+          [[ "$(sha256sum "$archive")" == "$(cat "$archive.sha256")" ]]
+          asset="$PLUGIN_PACKAGE.tgz"
+          cp "$archive" "$asset"
+          sha256sum "$asset" > "$asset.sha256"
+
+          if ! gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release create "$tag" --repo "$GITHUB_REPOSITORY" --verify-tag --title "$tag" \
+              --notes 'Versioned DSH plugin archive and SHA-256 checksum.' "$asset" "$asset.sha256"
+          fi
+          gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json isDraft,isPrerelease |
+            jq -e '.isDraft == false and .isPrerelease == false' >/dev/null
+          gh release download "$tag" --repo "$GITHUB_REPOSITORY" --dir verify \
+            --pattern "$asset" --pattern "$asset.sha256"
+          cmp "$asset" "verify/$asset"
+          cmp "$asset.sha256" "verify/$asset.sha256"
