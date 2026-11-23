@@ -1,0 +1,38 @@
+{
+  "name": "dsh-bundle-codex-tools",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "displayName": "Codex 登录与模型管理",
+  "description": "ChatGPT sign-in and a live, account-scoped model picker for DeepSeek Harness.",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/compilink/dsh-codex-plugin.git"
+  },
+  "main": "./src/index.mjs",
+  "exports": "./src/index.mjs",
+  "engines": {
+    "node": ">=22.19"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "files": [
+    "src/",
+    "cordis.patch.yml",
+    "README.md"
+  ],
+  "scripts": {
+    "test": "node --test tests/*.test.mjs"
+  },
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "dsh-bundle",
+    "codex",
+    "openai-codex"
+  ],
+  "homepage": "https://github.com/compilink/dsh-codex-plugin"
+}

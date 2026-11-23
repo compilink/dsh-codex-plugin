@@ -1,0 +1,8 @@
+- id: llm-pi-ai
+  config:
+    providers:
+      openai-codex:
+        models:
+          - id: gpt-test-existing
+            name: Existing test configuration
+            contextWindow: 98304

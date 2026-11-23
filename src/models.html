@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Codex 模型更新 · DSH</title>
+<style>
+:root{color-scheme:light dark}body{max-width:50rem;margin:3rem auto;padding:0 1.25rem;font:1rem/1.6 system-ui}h1{margin-bottom:.5rem}
+button{font:inherit;padding:.45rem .9rem;cursor:pointer}button:disabled{cursor:default}ul{padding-left:0}li{list-style:none;border-bottom:1px solid #8885;padding:.6rem 0}
+label{display:block}small{display:block;margin-left:1.5rem}nav{display:flex;gap:1rem}#status{min-height:1.6rem}output{display:block}
+</style></head><body>
+<nav><a href="/">返回 DSH</a><a href="/local/chatgpt">ChatGPT 登录</a></nav>
+<h1>Codex 模型更新</h1>
+<p>从当前登录账号获取可用模型，勾选后添加到 DSH 的 Codex 提供商。</p>
+<button id="refresh" type="button">获取最新模型</button>
+<p id="status" role="status"></p>
+<ul id="list"></ul><button id="save" type="button" disabled>添加选中模型</button>
+<script nonce="__CSRF__">
+const csrf='__CSRF__';
+const refresh=document.getElementById('refresh'),save=document.getElementById('save');
+const status=document.getElementById('status'),list=document.getElementById('list');
+let preview=null,busy=false;
+const selection=()=>Array.from(list.querySelectorAll('input:checked:not(:disabled)'),box=>box.value);
+function controls(){refresh.disabled=busy;save.disabled=busy||!preview||!selection().length;}
+async function api(body){
+  const result=await fetch('/local/chatgpt/models/api',{method:body?'POST':'GET',headers:{'x-dsh-login':csrf,'content-type':'application/json'},body:body?JSON.stringify(body):undefined});
+  const data=await result.json();if(!result.ok)throw Error(data.error);return data;
+}
+function render(candidates,configured){
+  const existing=new Set(configured);list.replaceChildren();
+  for(const model of candidates){
+    const li=document.createElement('li'),label=document.createElement('label'),box=document.createElement('input');
+    box.type='checkbox';box.value=model.id;box.checked=box.disabled=existing.has(model.id);
+    label.append(box,document.createTextNode(' '+model.name+(box.disabled?'（已配置）':'')));
+    const info=document.createElement('small');
+    info.textContent=[model.id,model.contextWindow?'上下文 '+model.contextWindow.toLocaleString():'',...(model.input||[]),...Object.keys(model.reasoningEfforts||{})].filter(Boolean).join(' · ');
+    li.append(label,info);list.append(li);
+  }
+}
+list.addEventListener('change',controls);
+refresh.onclick=async()=>{
+  busy=true;preview=null;controls();list.replaceChildren();status.textContent='正在查询当前账号的模型目录…';
+  try{
+    const data=await api({action:'refresh'});preview=data.preview;render(data.candidates,data.configured);
+    status.textContent='当前账号返回 '+data.candidates.length+' 个可用模型。';
+  }catch(error){status.textContent=error.message;}finally{busy=false;controls();}
+};
+save.onclick=async()=>{
+  const ids=selection();busy=true;controls();
+  try{
+    const data=await api({action:'save',preview,ids});status.textContent='已添加 '+data.added.length+' 个模型。';
+    for(const box of list.querySelectorAll('input:checked')) box.disabled=true;
+    preview=null;
+  }catch(error){status.textContent=error.message;}finally{busy=false;controls();}
+};
+api().then(data=>{if(!busy&&!preview)status.textContent='目前已配置 '+data.configured.length+' 个 Codex 模型。';})
+  .catch(error=>{if(!busy&&!preview)status.textContent=error.message;});
+</script></body></html>

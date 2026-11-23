@@ -1,0 +1,30 @@
+name: Publish prebuilt plugin
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify and publish the tagged package
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PLUGIN_PACKAGE: dsh-bundle-codex-tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REF_TYPE" == tag && "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          git init --quiet source
+          git -C source fetch --quiet --depth=1 "https://github.com/$GITHUB_REPOSITORY.git" "$GITHUB_REF"
+          commit="$(git -C source rev-parse FETCH_HEAD^{commit})"
+          [[ "$commit" == "$GITHUB_SHA" ]]
+          archive="$PLUGIN_PACKAGE-${GITHUB_REF_NAME#v}.tgz"
+          git -C source show "$commit:releases/$archive" > "$archive"
+          git -C source show "$commit:releases/$archive.sha256" > "$archive.sha256"
+          sha256sum --check "$archive.sha256"
+          cp "$archive" "$PLUGIN_PACKAGE.tgz"
+          sha256sum "$PLUGIN_PACKAGE.tgz" > "$PLUGIN_PACKAGE.tgz.sha256"
+          gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --verify-tag --title "$GITHUB_REF_NAME" --notes "Versioned DSH plugin archive and SHA-256 checksum." "$PLUGIN_PACKAGE.tgz" "$PLUGIN_PACKAGE.tgz.sha256"

@@ -1,0 +1,17 @@
+<!doctype html><html lang="zh"><meta charset="utf-8"><title>DSH · ChatGPT 登录</title>
+<style>body{max-width:720px;margin:48px auto;padding:0 20px;font:16px/1.6 system-ui}button,input,select{font:inherit;margin:6px;padding:8px}input{width:85%}pre{white-space:pre-wrap}a{overflow-wrap:anywhere}</style>
+<nav><a href="/local/chatgpt/models">Codex 模型更新</a></nav><h1>使用 ChatGPT 登录</h1><p>登录凭据由 DSH 保存在持久数据目录。已登录时无需因升级重新登录。</p>
+<p id="status">读取状态…</p><button id="begin">使用 ChatGPT 登录</button><button id="cancel">取消本次登录</button>
+<section id="notices"></section><section id="prompt"></section><pre id="error"></pre>
+<script nonce="__CSRF__">
+const token='__CSRF__';let promptId;
+async function api(body){const r=await fetch('/local/chatgpt/api',{method:body?'POST':'GET',headers:{'x-dsh-login':token,'content-type':'application/json'},...(body?{body:JSON.stringify(body)}:{})});const v=await r.json();if(!r.ok)throw Error(v.error);return v}
+async function action(body){try{await api(body);await refresh()}catch(e){document.getElementById('error').textContent=e.message}}
+document.getElementById('begin').onclick=()=>action({action:'begin'});
+document.getElementById('cancel').onclick=()=>action({action:'cancel'});
+async function refresh(){try{const s=await api();document.getElementById('status').textContent=(s.configured?'已保存 ChatGPT 登录凭据':'尚未登录')+'；状态：'+s.status;document.getElementById('begin').disabled=!s.available||s.status==='running';
+const n=document.getElementById('notices');n.replaceChildren();for(const v of s.notices){const p=document.createElement('p');p.textContent=v.message+(v.code?' '+v.code:'');n.append(p);if(v.url){const u=new URL(v.url);if(u.protocol==='https:'){const a=document.createElement('a');a.href=u.href;a.target='_blank';a.rel='noopener noreferrer';a.textContent='打开授权页面';n.append(a)}}}
+if(promptId!==s.prompt?.id){promptId=s.prompt?.id;const p=document.getElementById('prompt');p.replaceChildren();if(s.prompt){const label=document.createElement('p');label.textContent=s.prompt.message;const input=document.createElement(s.prompt.kind==='select'?'select':'input');if(s.prompt.kind==='select'){for(const o of s.prompt.options){const option=document.createElement('option');option.value=o.id;option.textContent=o.label;input.append(option)}}else{input.type=s.prompt.kind==='secret'?'password':'text';input.placeholder=s.prompt.placeholder||''}const button=document.createElement('button');button.textContent='提交';button.onclick=()=>{const value=input.value;input.value='';action({action:'answer',id:promptId,value})};p.append(label,input,button)}}document.getElementById('error').textContent=s.error||'';
+}catch(e){document.getElementById('error').textContent=e.message}}
+refresh();setInterval(refresh,1500);
+</script></html>
