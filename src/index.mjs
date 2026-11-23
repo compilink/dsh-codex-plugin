@@ -31,9 +31,11 @@ export function apply(ctx) {
     const modelPage = url.pathname === '/local/chatgpt/models';
     const modelApi = url.pathname === '/local/chatgpt/models/api';
     if (!(loginPage || loginApi || modelPage || modelApi)) return send(res,404,{error:'not-found'});
-    const rejection = ctx.connection.requestRejection(req);
+    const admission = ctx.connection.admit(req);
+    const rejection = 'rejection' in admission ? admission.rejection
+      : admission.peer === ctx.connection.browserPeer ? undefined : 403;
     const local = /^(?:localhost|127\.0\.0\.1|\[::1\])(?::\d+)?$/.test(req.headers.host ?? '');
-    const passive = local && req.method === 'GET' && (loginPage || loginApi) && !req.headers.origin;
+    const passive = rejection === 401 && local && req.method === 'GET' && (loginPage || loginApi) && !req.headers.origin;
     if (rejection !== undefined && !passive) return send(res,rejection,{error:'请先从 DSH 的已登录页面打开 Codex。'});
     if ((loginPage || modelPage) && req.method === 'GET') {
       res.writeHead(200, { ...headers, 'content-type':'text/html; charset=utf-8' });

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { apply } from '../src/index.mjs';
 test('login UI requires loopback Host and page nonce, exposes presence but no credential value', async () => {
   let route;
-  apply({ effect: f => f(), on() {}, connection:{requestRejection(req){ return req.headers.host === '127.0.0.1:3080' ? 401 : 403; }},
+  apply({ effect: f => f(), on() {}, connection:{admit(req){ return {rejection:req.headers.host === '127.0.0.1:3080' ? 401 : 403}; }},
     webServer: { register: r => { route = r; return () => {}; } },
     credentials: { describeRecord: async () => ({ configured: true }) },
     authorization: { describe: () => ({}), cancel() {} },
@@ -27,7 +27,7 @@ test('login UI requires loopback Host and page nonce, exposes presence but no cr
 test('the model settings route and login actions require DSH admission, including when a valid page nonce is known', async()=>{
   let route;let beginCalls=0;
   apply({effect:f=>f(),on(){},webServer:{register:r=>{route=r;return ()=>{};}},
-    connection:{requestRejection:req=>req.headers.cookie==='synthetic-web-session'?undefined:401},
+    connection:{browserPeer:'owner',admit:req=>req.headers.cookie==='synthetic-web-session'?{peer:'owner'}:req.headers.cookie==='authenticated-api-session'?{peer:'limited'}:{rejection:401}},
     authorization:{begin(){beginCalls++;},cancel(){}},credentials:{}});
   async function request(path,method,headers={},body) {
     let code,value;
@@ -39,6 +39,11 @@ test('the model settings route and login actions require DSH admission, includin
   const csrf=login.value.match(/const token='([^']+)'/)[1];
   assert.equal((await request('/local/chatgpt/models','GET')).code,401);
   assert.equal((await request('/local/chatgpt/api','POST',{'x-dsh-login':csrf},{action:'begin'})).code,401);
+  assert.equal((await request('/local/chatgpt/api','POST',{cookie:'authenticated-api-session','x-dsh-login':csrf},{action:'begin'})).code,403);
+  assert.equal((await request('/local/chatgpt/api','GET',{cookie:'authenticated-api-session','x-dsh-login':csrf})).code,403);
+  assert.equal((await request('/local/chatgpt/models','GET',{cookie:'authenticated-api-session'})).code,403);
+  assert.equal((await request('/local/chatgpt/models/api','POST',{cookie:'authenticated-api-session','x-dsh-login':csrf},{action:'refresh'})).code,403);
+  assert.equal((await request('/local/chatgpt/models/api','POST',{cookie:'authenticated-api-session','x-dsh-login':csrf},{action:'save'})).code,403);
   assert.equal(beginCalls,0);
   assert.equal((await request('/local/chatgpt/models/api','POST',{cookie:'synthetic-web-session'},{action:'refresh'})).code,403);
   assert.equal((await request('/local/chatgpt/models','GET',{cookie:'synthetic-web-session'})).code,200);
