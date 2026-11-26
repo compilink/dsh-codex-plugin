@@ -6,7 +6,7 @@ export function modelManager(ctx, signal, fetchCatalog = discover) {
   function config() {
     const route = ctx.llm.listConfigurableProviders().find(row => row.provider === PROVIDER);
     if (!route || route.declared || route.settingsPath.join('/') !== 'providers/openai-codex') {
-      throw new UserError(409, 'DSH Web profile 需要启用支持 openai-codex 的 llm-pi-ai。');
+      throw new UserError(409, '当前 DSH 配置需要启用支持 openai-codex 的 llm-pi-ai。');
     }
     const view = ctx.settings.describe({redactSecrets:true}).find(row => row.ns === route.settingsNs);
     if (!view) throw new UserError(409, 'DSH 的模型配置当前不可用。');

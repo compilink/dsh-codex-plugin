@@ -1,22 +1,29 @@
 # Codex 登录与模型管理
 
-在 DeepSeek Harness（DSH）里使用 ChatGPT 账号登录 Codex，并从该账号的在线目录选择模型。插件为 DSH Web 添加登录页和独立的模型更新页。选中的模型写入现有 `openai-codex` 提供商，推理继续由 DSH 原生 pi-ai 适配器执行。
+在 DeepSeek Harness 的「设置 → Codex 登录与模型」中登录 ChatGPT，或从当前账号的在线目录选择模型。浏览器版和 macOS 桌面版共用设置面板和安装包。模型推理、授权和凭据持久化由 DSH 原生提供商管理。
 
-## 在线安装
+## 安装
 
-公开版本 `v0.1.0` 针对 DSH Web `0.2.2-rc.1`，要求 Node.js 22.19 或更高版本，并已启用 `llm-pi-ai` 的 `openai-codex` 提供商。插件使用 Web profile 的 connection、authorization、credentials、settings、llm 和 webServer 服务。部署若已升级到区分浏览器和 API 身份的 DSH 版本，需先确认此发行版的浏览器身份检查与该部署兼容。
+在运行插件的 DSH 中打开「插件 → 添加插件」，输入 [Releases](https://github.com/compilink/dsh-codex-plugin/releases) 中安装包的下载地址。桌面客户端与 Docker Web 各自管理自己的插件和数据。使用 Web CLI 时可执行：
 
 ```sh
-dsh plugin --profile web add --ignore-scripts https://github.com/compilink/dsh-codex-plugin/releases/download/v0.1.0/dsh-bundle-codex-tools.tgz
+dsh plugin --profile web add --ignore-scripts https://github.com/compilink/dsh-codex-plugin/releases/download/v0.2.0/dsh-bundle-codex-tools.tgz
 ```
 
-重新加载 Web profile 后，登录 DSH，在页面右下角打开「Codex 登录与模型」。从旧版本地登录插件迁移时，先备份 Web profile，再撤下旧插件对 `/local/chatgpt` 的 Cordis 注册，并保留原有数据目录和模型提供商。安装包与校验文件见 [v0.1.0 Release](https://github.com/compilink/dsh-codex-plugin/releases/tag/v0.1.0)。
+Host 需要启用 `llm-pi-ai/openai-codex`、授权、凭据、Web Server 和设置服务。安装或更新后按插件管理器提示应用改动，然后在 DSH 设置中打开「Codex 登录与模型」。旧登录和模型页面仍可从原书签访问。
 
-## 登录并添加模型
+## 登录
 
-1. 在登录页（`/local/chatgpt`）查看凭据状态。如果显示「尚未登录」，点击「使用 ChatGPT 登录」，按 DSH 提供商的提示完成浏览器授权或设备码登录。已有有效凭据时可直接进入下一步。
-2. 打开「Codex 模型更新」（`/local/chatgpt/models`），点击「获取最新模型」。列表来自当前登录账号，已配置的模型会标记出来。若目录提供了相应信息，页面还会显示上下文窗口、输入类型和推理强度。
-3. 勾选需要的模型，点击「添加选中模型」，然后回到 DSH 的模型选择器切换使用。仅查询目录不会写入配置。个人默认模型和已有会话的模型选择由 DSH 继续管理。
+在「账号登录」中自行选择登录方式。已经保存有效凭据时，可直接查看「模型更新」。
+
+- **浏览器登录**适用于 DSH 进程和浏览器都原生运行在同一台电脑。打开 OpenAI 官方页面完成授权后，DSH 通过本机回调接收结果，面板自动显示状态。浏览器拦截弹窗时点击面板里的「打开 OpenAI 授权页」。回调端口被占用时，可以取消后改用设备码，或展开备用输入区手动提交本次回调。
+- **设备码登录**适用于 Docker、远程主机以及无法接收本机回调的情况。在设置中查看一次性短码，点击「打开 OpenAI 授权页」，输入并确认短码。个人账号或工作区需要允许设备码登录。面板会自动更新授权状态。
+
+取消会结束本次尝试。打开设置或查看账号状态不会发起新授权。
+
+## 模型更新
+
+进入「模型更新」并选择「获取最新模型」，查看该账号返回的候选和已有配置。勾选需要的模型，点「添加选中模型」保存。原有模型、自定义字段、默认选择和会话保持原样。模型目录来自当前账号，可能随账号权限而不同。
 
 ## 配置与凭据
 
@@ -32,3 +39,5 @@ npm pack --ignore-scripts --dry-run
 ```
 
 本包使用 Node.js 标准库，发布包只含运行代码、界面、Cordis 注册文件与说明。使用合成凭据验证登录权限、目录查询和模型保存的步骤见 [Docker 集成测试](tests/smoke/README.md)。
+
+管理接口需要 DSH 已认证的浏览器或桌面客户端身份。Windows 桌面适配暂未提供。

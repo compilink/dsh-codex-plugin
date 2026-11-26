@@ -8,6 +8,11 @@ test('login UI requires loopback Host and page nonce, exposes presence but no cr
     credentials: { describeRecord: async () => ({ configured: true }) },
     authorization: { describe: () => ({}), cancel() {} },
   });
+  const facts = {transport:'http', method:'GET', url:new URL('http://localhost/local/chatgpt'), headers:new Headers({host:'127.0.0.1:3080'})};
+  assert.equal(route.auth(facts),'anonymous');
+  assert.equal(route.auth({...facts,method:'POST'}),'required');
+  assert.equal(route.auth({...facts,headers:{host:'localhost',origin:'http://localhost'}}),'required');
+  assert.equal(route.auth({...facts,url:new URL('http://localhost/local/chatgpt/models')}),'required');
   async function call(url, headers = {}) {
     let code, body;
     await route.handler({ url, method: 'GET', headers: { host: '127.0.0.1:3080', ...headers } },
@@ -47,4 +52,24 @@ test('the model settings route and login actions require DSH admission, includin
   assert.equal(beginCalls,0);
   assert.equal((await request('/local/chatgpt/models/api','POST',{cookie:'synthetic-web-session'},{action:'refresh'})).code,403);
   assert.equal((await request('/local/chatgpt/models','GET',{cookie:'synthetic-web-session'})).code,200);
+});
+
+test('the token provider distinguishes browser, API and in-process owner peers', async () => {
+  const internal = {principal:{kind:'owner'}};
+  const browser = {principal:{kind:'owner'}};
+  const api = {principal:{kind:'owner'}};
+  let route;
+  let peer;
+  const context={effect:f=>f(),on(){},webServer:{register(r){route=r;return ()=>{};}},
+    inject:(names,mount)=>{assert.deepEqual(names,['connection.authentication']);return mount(context);},
+    get:name=>name==='dshLocalBrowserOwner'?{matches:actual=>actual===browser}:name==='connection.authentication'?{}:undefined,connection:{browserPeer:internal,admit:()=>peer?{peer}:{rejection:401}},
+    authorization:{cancel(){}},credentials:{}};
+  apply(context);
+  for (const [requestPeer,status] of [[undefined,401],[api,403],[internal,403],[browser,200]]) {
+    peer=requestPeer;
+    let code;
+    await route.handler({url:'/local/chatgpt/models',method:'GET',headers:{host:'localhost:3080'}},
+      {writeHead:c=>{code=c;},end(){}});
+    assert.equal(code,status);
+  }
 });

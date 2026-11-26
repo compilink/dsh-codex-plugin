@@ -1,6 +1,6 @@
 {
   "name": "dsh-bundle-codex-tools",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "displayName": "Codex 登录与模型管理",
@@ -10,13 +10,22 @@
     "url": "https://github.com/compilink/dsh-codex-plugin.git"
   },
   "main": "./src/index.mjs",
-  "exports": "./src/index.mjs",
+  "exports": {
+    ".": "./src/index.mjs",
+    "./client": "./src/client.js"
+  },
   "engines": {
     "node": ">=22.19"
   },
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-settings"
+      ]
     }
   },
   "files": [

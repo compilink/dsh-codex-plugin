@@ -4,8 +4,43 @@ import { modelManager } from './models.mjs';
 import { UserError } from './catalog.mjs';
 export const inject = ['authorization', 'credentials', 'webServer', 'connection', 'llm', 'settings'];
 
+function routeAuth({transport, method, url, headers}) {
+  if (transport !== 'http' || method !== 'GET' || !['/local/chatgpt', '/local/chatgpt/api'].includes(url.pathname)) return 'required';
+  const get = name => typeof headers.get === 'function' ? headers.get(name) : headers[name];
+  const host = get('host');
+  return typeof host === 'string' && /^(?:localhost|127\.0\.0\.1|\[::1\])(?::\d+)?$/.test(host) &&
+    get('origin') == null ? 'anonymous' : 'required';
+}
+
+function isBrowserOwner(ctx, peer, req) {
+  if (!peer) return false;
+  const browser = ctx.get?.('dshLocalBrowserOwner');
+  if (browser?.matches(peer)) return true;
+  const authentication = ctx.get?.('connection.authentication');
+  if (!authentication) return peer === ctx.connection.browserPeer;
+  // Modern DSH gives its browser, desktop shell, and API operators separate owner peers.
+  // Reauthenticate just the supported UI cookie so an unrelated API credential cannot admit it.
+  if (peer.principal?.kind !== 'owner' || typeof authentication.authenticate !== 'function') return false;
+  const cookies = (req.headers.cookie ?? '').split(';').map(cookie => cookie.trim());
+  for (const cookie of cookies) {
+    if (!/^dsh-desktop-session=[A-Za-z0-9_-]{43}$/.test(cookie) &&
+        !/^dsh-auth-[A-Za-z0-9_-]{43}=v1\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]{43}$/.test(cookie)) continue;
+    const result = authentication.authenticate({ headers: { host: req.headers.host, cookie } });
+    if (result.peer === peer) return true;
+  }
+  return false;
+}
+
 /** Local browser surface for the existing provider-owned OAuth flow. */
 export function apply(ctx) {
+  if (ctx.get?.('connection.authentication') !== undefined) {
+    ctx.inject(['connection.authentication'], scoped => mount(scoped))
+    return;
+  }
+  return mount(ctx);
+}
+
+function mount(ctx) {
   const key = 'llm-pi-ai/openai-codex';
   const csrf = randomUUID();
   let state = { status: 'idle', notices: [], prompt: null };
@@ -20,23 +55,23 @@ export function apply(ctx) {
     res.writeHead(code, { ...headers, 'content-type': 'application/json' });
     res.end(JSON.stringify(value));
   };
-  ctx.on('webserver/index-inject', rows => rows.push({ kind: 'html', placement: 'body',
-    html: '<a href="/local/chatgpt" target="_blank" rel="noopener" style="position:fixed;right:16px;bottom:12px;z-index:9999;padding:6px 10px;border:1px solid #888;border-radius:8px;background:#fff;color:#222;font:12px sans-serif">Codex 登录与模型</a>' }));
-  ctx.effect(() => ctx.webServer.register({ kind: 'prefix', path: '/local/chatgpt', async handler(req, res) {
+  ctx.effect(() => ctx.webServer.register({ kind: 'prefix', path: '/local/chatgpt', auth: routeAuth, async handler(req, res) {
     let url;
     try { url = new URL(req.url, 'http://localhost'); }
     catch { return send(res,400,{error:'invalid-url'}); }
     const loginPage = url.pathname === '/local/chatgpt';
     const loginApi = url.pathname === '/local/chatgpt/api';
+    const panelSession = url.pathname === '/local/chatgpt/panel-session';
     const modelPage = url.pathname === '/local/chatgpt/models';
     const modelApi = url.pathname === '/local/chatgpt/models/api';
-    if (!(loginPage || loginApi || modelPage || modelApi)) return send(res,404,{error:'not-found'});
+    if (!(loginPage || loginApi || panelSession || modelPage || modelApi)) return send(res,404,{error:'not-found'});
     const admission = ctx.connection.admit(req);
     const rejection = 'rejection' in admission ? admission.rejection
-      : admission.peer === ctx.connection.browserPeer ? undefined : 403;
+      : isBrowserOwner(ctx, admission.peer, req) ? undefined : 403;
     const local = /^(?:localhost|127\.0\.0\.1|\[::1\])(?::\d+)?$/.test(req.headers.host ?? '');
     const passive = rejection === 401 && local && req.method === 'GET' && (loginPage || loginApi) && !req.headers.origin;
     if (rejection !== undefined && !passive) return send(res,rejection,{error:'请先从 DSH 的已登录页面打开 Codex。'});
+    if (panelSession && req.method === 'GET') return send(res, 200, { csrf });
     if ((loginPage || modelPage) && req.method === 'GET') {
       res.writeHead(200, { ...headers, 'content-type':'text/html; charset=utf-8' });
       res.end(loginPage ? html : modelHtml); return;
@@ -62,11 +97,33 @@ export function apply(ctx) {
       }
       if (body.action === 'begin') {
         if (attempt) return send(res, 409, { error: 'already-running' });
-        state = { status: 'running', notices: [], prompt: null };
+        const method = body.method;
+        if (method !== undefined && !['device_code', 'browser'].includes(method))
+          return send(res, 400, { error: '请选择浏览器登录或设备码登录。' });
+        let methodChosen = false;
+        state = { status: 'running', notices: [], prompt: null, ...(method && { method }) };
         attempt = ctx.authorization.begin({ key, method: 'oauth', signal: controller.signal,
           interaction: {
-            notify: notice => { state.notices.push(notice); },
+            notify: notice => {
+              if (method === 'device_code' && !methodChosen && notice.url && !notice.code) {
+                state.error = '当前提供商未提供设备码登录，请改选浏览器登录。';
+                ctx.authorization.cancel(key);
+                return;
+              }
+              state.notices.push(notice);
+            },
             prompt: prompt => new Promise((resolve, reject) => {
+              if (method && !methodChosen && prompt.kind === 'select' &&
+                  prompt.options?.some(option => ['browser', 'device_code'].includes(option.id))) {
+                if (prompt.options.some(option => option.id === method)) {
+                  methodChosen = true;
+                  resolve(method);
+                } else {
+                  state.error = '当前提供商不支持所选登录方式，请重新选择。';
+                  reject(new Error('unsupported-login-method'));
+                }
+                return;
+              }
               const id = randomUUID();
               state.prompt = { id, kind: prompt.kind, message: prompt.message, options: prompt.options, placeholder: prompt.placeholder };
               const cancel = () => { if (state.prompt?.id === id) state.prompt = null; pending = null; reject(new Error('prompt-cancelled')); };
@@ -75,8 +132,11 @@ export function apply(ctx) {
               pending = { id, resolve: value => { prompt.signal?.removeEventListener('abort', cancel); state.prompt = null; pending = null; resolve(value); } };
             }),
           },
-        }).then(result => { state.status = result.status; }, error => { state.status = 'failed'; state.error = error.code ?? 'authorization-failed'; })
-          .finally(() => { attempt = null; pending = null; state.prompt = null; });
+        }).then(result => { state.status = state.error ? 'failed' : result.status; }, () => {
+          state.status = 'failed';
+          state.error ??= '授权没有完成。请检查网络、账号权限或验证信息，然后重试。';
+        })
+          .finally(() => { attempt = null; pending = null; state.prompt = null; state.notices = []; });
       } else if (body.action === 'answer') {
         if (!pending || body.id !== pending.id || typeof body.value !== 'string') return send(res, 409, { error: 'stale-prompt' });
         pending.resolve(body.value);
